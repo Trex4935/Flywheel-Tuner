@@ -14,13 +14,15 @@ import edu.wpi.first.math.filter.SlewRateLimiter;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
+import com.ctre.phoenix.motorcontrol.can.TalonSRX;
 import com.ctre.phoenix.motorcontrol.can.WPI_TalonFX;
 import com.ctre.phoenix.motorcontrol.ControlMode;
 import com.ctre.phoenix.motorcontrol.FeedbackDevice;
 import com.ctre.phoenix.motorcontrol.FollowerType;
 import com.ctre.phoenix.motorcontrol.InvertType;
 import com.ctre.phoenix.motorcontrol.NeutralMode;
-import com.ctre.phoenix.motorcontrol.TalonFXSensorCollection;;
+import com.ctre.phoenix.motorcontrol.TalonFXSensorCollection;
+import com.ctre.phoenix.motorcontrol.TalonSRXControlMode;;
 
 /**
  * This is a demo program showing the use of the RobotDrive class, specifically
@@ -30,7 +32,7 @@ public class Robot extends TimedRobot {
   private XboxController m_xboxController = new XboxController(0);
   private PowerDistribution m_pdp = new PowerDistribution();
   private int deviceID = 1;
-  private int m_follow_deviceID = 0;    // CAN Id zero disables follow motor mode
+  private int m_follow_deviceID = 0; // CAN Id zero disables follow motor mode
   private boolean m_follow_motor_inverted = true;
   private double m_setPoint = 0;
   private long m_startTime_nanosec = 0;
@@ -45,7 +47,9 @@ public class Robot extends TimedRobot {
   private SlewRateLimiter m_rateLimiter;
   private double m_rate_RPMpersecond;
   public double kP, kI, kD, kIz, kFF, kMaxOutput, kMinOutput, maxRPM;
-  SendableChooser <String> mode_chooser = new SendableChooser<>();
+  SendableChooser<String> mode_chooser = new SendableChooser<>();
+
+  private TalonSRX mag;
 
   final int kPIDLoopIdx = 0;
   final int kTimeoutMs = 30;
@@ -53,14 +57,14 @@ public class Robot extends TimedRobot {
   // FalconFX reports velocity in counts per 100ms
   // 1 revolution = 2048 counts
   // 1 minutes = 60 * 10 * 100ms
-  // conversion is  600  / 2048
+  // conversion is 600 / 2048
   public double ticks2RPm = 600.0 / 2048.0;
 
   @Override
   public void robotInit() {
 
     // PID coefficients (starting point)
-    // Small initial kFF and kP values, probably just big enough to do *something* 
+    // Small initial kFF and kP values, probably just big enough to do *something*
     // and *probably* too small to overdrive an untuned system.
     kFF = 0.02;
     kP = 0.04;
@@ -69,8 +73,8 @@ public class Robot extends TimedRobot {
     kIz = 0;
     kMaxOutput = 1.0;
     kMinOutput = -1.0;
-    maxRPM = 6300;     // free speed of Falcon 500 is listed as 6380
-    m_rate_RPMpersecond = 1e10;    // 10 million effectively disables rate limiting
+    maxRPM = 6300; // free speed of Falcon 500 is listed as 6380
+    m_rate_RPMpersecond = 1e10; // 10 million effectively disables rate limiting
 
     m_rateLimiter = new SlewRateLimiter(m_rate_RPMpersecond, m_setPoint);
 
@@ -86,7 +90,7 @@ public class Robot extends TimedRobot {
     SmartDashboard.putNumber("Min Output", kMinOutput);
     SmartDashboard.putNumber("CAN Id", deviceID);
     SmartDashboard.putNumber("SetPoint (RPM)", m_setPoint);
-    SmartDashboard.putNumber("Velocity (RPM)", m_encoder.getIntegratedSensorVelocity() * ticks2RPm );
+    SmartDashboard.putNumber("Velocity (RPM)", m_encoder.getIntegratedSensorVelocity() * ticks2RPm);
     SmartDashboard.putNumber("Total Current (Amp)", m_motor.getStatorCurrent());
     SmartDashboard.putNumber("Total Power (W)", m_pdp.getTotalPower());
     SmartDashboard.putNumber("Time to reach RPM", m_elapsedTime_sec);
@@ -111,10 +115,16 @@ public class Robot extends TimedRobot {
 
     // initialize motor
     m_motor = new WPI_TalonFX(deviceID);
+    // m_motor.setSensorPhase(false);
+    mag = new TalonSRX(6);
+    mag.configFactoryDefault();
+    mag.set(TalonSRXControlMode.PercentOutput, -0.5);
 
     /**
-     * The RestoreFactoryDefaults method can be used to reset the configuration parameters 
-     * in the SPARK MAX to their factory default state. If no argument is passed, these 
+     * The RestoreFactoryDefaults method can be used to reset the configuration
+     * parameters
+     * in the SPARK MAX to their factory default state. If no argument is passed,
+     * these
      * parameters will not persist between power cycles
      */
     m_motor.configFactoryDefault();
@@ -123,9 +133,11 @@ public class Robot extends TimedRobot {
     m_motor.configSelectedFeedbackSensor(FeedbackDevice.IntegratedSensor, kPIDLoopIdx, kTimeoutMs);
 
     if (m_follow_motor != null) {
-      // If there was a follow motor before, reset it to factory defaults. (disable follow mode)
+      // If there was a follow motor before, reset it to factory defaults. (disable
+      // follow mode)
       m_follow_motor.configFactoryDefault();
-      // make sure motor is in coast mode, in case this motor is mechanically joined to the lead motor
+      // make sure motor is in coast mode, in case this motor is mechanically joined
+      // to the lead motor
       m_follow_motor.setNeutralMode(NeutralMode.Coast);
     }
 
@@ -136,8 +148,7 @@ public class Robot extends TimedRobot {
       m_follow_motor.follow(m_motor, FollowerType.PercentOutput);
       // always spin opposite of the lead motor
       m_follow_motor.setInverted(InvertType.OpposeMaster);
-    }
-    else {
+    } else {
       m_follow_motor = null;
     }
     m_follow_deviceID = follow_canId;
@@ -152,14 +163,14 @@ public class Robot extends TimedRobot {
 
     // set PID coefficients
     m_motor.config_kF(kPIDLoopIdx, kFF, kTimeoutMs);
-		m_motor.config_kP(kPIDLoopIdx, kP, kTimeoutMs);
-		m_motor.config_kI(kPIDLoopIdx, kI, kTimeoutMs);
-		m_motor.config_kD(kPIDLoopIdx, kD, kTimeoutMs);
+    m_motor.config_kP(kPIDLoopIdx, kP, kTimeoutMs);
+    m_motor.config_kI(kPIDLoopIdx, kI, kTimeoutMs);
+    m_motor.config_kD(kPIDLoopIdx, kD, kTimeoutMs);
     m_motor.config_IntegralZone(kPIDLoopIdx, kIz, kTimeoutMs);
     m_motor.configNominalOutputForward(0, kTimeoutMs);
     m_motor.configNominalOutputReverse(0, kTimeoutMs);
-		m_motor.configPeakOutputForward(1, kTimeoutMs);
-		m_motor.configPeakOutputReverse(-1, kTimeoutMs);
+    m_motor.configPeakOutputForward(1, kTimeoutMs);
+    m_motor.configPeakOutputReverse(-1, kTimeoutMs);
 
   }
 
@@ -182,22 +193,41 @@ public class Robot extends TimedRobot {
         || (follow_inverted != m_follow_motor_inverted)) {
       initMotorController(canId, invert_motor, follow_canId, follow_inverted);
 
-      // Reset RPM to zero if we change anything about the motor configuration. (safety first!)
+      // Reset RPM to zero if we change anything about the motor configuration.
+      // (safety first!)
       m_setPoint = 0;
     }
 
-    // if PID coefficients on SmartDashboard have changed, write new values to controller
-    if((p != kP)) { m_motor.config_kP(kPIDLoopIdx, p, kTimeoutMs); kP = p; }
-    if((i != kI)) { m_motor.config_kI(kPIDLoopIdx, i, kTimeoutMs); kI = i; }
-    if((d != kD)) { m_motor.config_kD(kPIDLoopIdx, d, kTimeoutMs); kD = d; }
-    if((iz != kIz)) { m_motor.config_IntegralZone(kPIDLoopIdx, iz, kTimeoutMs); kIz = iz; }
-    if((ff != kFF)) { m_motor.config_kF(kPIDLoopIdx, ff, kTimeoutMs);; kFF = ff; }
-    if((max != kMaxOutput) || (min != kMinOutput)) { 
+    // if PID coefficients on SmartDashboard have changed, write new values to
+    // controller
+    if ((p != kP)) {
+      m_motor.config_kP(kPIDLoopIdx, p, kTimeoutMs);
+      kP = p;
+    }
+    if ((i != kI)) {
+      m_motor.config_kI(kPIDLoopIdx, i, kTimeoutMs);
+      kI = i;
+    }
+    if ((d != kD)) {
+      m_motor.config_kD(kPIDLoopIdx, d, kTimeoutMs);
+      kD = d;
+    }
+    if ((iz != kIz)) {
+      m_motor.config_IntegralZone(kPIDLoopIdx, iz, kTimeoutMs);
+      kIz = iz;
+    }
+    if ((ff != kFF)) {
+      m_motor.config_kF(kPIDLoopIdx, ff, kTimeoutMs);
+      ;
+      kFF = ff;
+    }
+    if ((max != kMaxOutput) || (min != kMinOutput)) {
       m_motor.configPeakOutputForward(max, kTimeoutMs);
       m_motor.configPeakOutputReverse(min, kTimeoutMs);
-      kMinOutput = min; kMaxOutput = max;
+      kMinOutput = min;
+      kMaxOutput = max;
     }
-    
+
     double ramprate = SmartDashboard.getNumber("Ramp Rate (RPM/s)", 0);
     if (ramprate != m_rate_RPMpersecond) {
       m_rateLimiter = new SlewRateLimiter(ramprate, m_setPoint);
@@ -206,46 +236,41 @@ public class Robot extends TimedRobot {
     }
 
     /**
-     * PIDController objects are commanded to a set point using the 
+     * PIDController objects are commanded to a set point using the
      * SetReference() method.
      * 
      * The first parameter is the value of the set point, whose units vary
      * depending on the control type set in the second parameter.
      * 
-     * The second parameter is the control type can be set to one of four 
+     * The second parameter is the control type can be set to one of four
      * parameters:
-     *  com.revrobotics.ControlType.kDutyCycle
-     *  com.revrobotics.ControlType.kPosition
-     *  com.revrobotics.ControlType.kVelocity
-     *  com.revrobotics.ControlType.kVoltage
+     * com.revrobotics.ControlType.kDutyCycle
+     * com.revrobotics.ControlType.kPosition
+     * com.revrobotics.ControlType.kVelocity
+     * com.revrobotics.ControlType.kVoltage
      */
     double setPoint = m_setPoint;
     if (mode_chooser.getSelected() == "variable") {
       // left joystick set RPM set point
-      setPoint =  m_xboxController.getLeftY() * maxRPM;
+      setPoint = m_xboxController.getLeftY() * maxRPM;
       if (Math.abs(setPoint) < 40) {
         // dead banding. ignore really small joystick inputs
         setPoint = 0;
       }
-    }
-    else if (mode_chooser.getSelected() == "fixed") {
+    } else if (mode_chooser.getSelected() == "fixed") {
       // press A, B, Y, X buttons set speed
       // press Right Bumper to stop (set RPM to zero)
       if (m_xboxController.getAButtonPressed()) {
-        setPoint = 1000;
-      }
-      else if (m_xboxController.getBButtonPressed()) {
-        setPoint = 2000;
-      }
-      else if (m_xboxController.getYButtonPressed()) {
-        setPoint = 3000;
-      }
-      else if (m_xboxController.getXButtonPressed()) {
-        setPoint = 4000;
-      }
-      else if (m_xboxController.getRightBumperPressed()) {
+        setPoint = 2600;
+      } else if (m_xboxController.getBButtonPressed()) {
+        setPoint = 2500;
+      } else if (m_xboxController.getYButtonPressed()) {
+        setPoint = 2400;
+      } else if (m_xboxController.getXButtonPressed()) {
+        setPoint = 2300;
+      } else if (m_xboxController.getRightBumperPressed()) {
         setPoint = 0;
-      } 
+      }
     }
 
     if (m_setPoint != setPoint) {
@@ -258,11 +283,11 @@ public class Robot extends TimedRobot {
       m_setPoint = setPoint;
     }
 
-    double rpm = m_encoder.getIntegratedSensorVelocity() * ticks2RPm;
+    double rpm = m_encoder.getIntegratedSensorVelocity() * ticks2RPm * -1;
 
     if (m_elapsedTime_sec == 0) {
       if (Math.abs(rpm - m_setPoint) < 50) {
-          m_elapsedTime_sec = ((double)(System.nanoTime() - m_startTime_nanosec)) / 1000000000.0;
+        m_elapsedTime_sec = ((double) (System.nanoTime() - m_startTime_nanosec)) / 1000000000.0;
       }
     }
 
@@ -281,14 +306,14 @@ public class Robot extends TimedRobot {
     // Calculate and set new reference RPM
     double reference_setpoint = m_rateLimiter.calculate(setPoint);
     if (setPoint == 0) {
-       // when we hit  stop, stop immediately. (safety!)
+      // when we hit stop, stop immediately. (safety!)
       reference_setpoint = 0;
       m_rateLimiter.reset(0);
     }
-    
+
     m_motor.set(ControlMode.Velocity, reference_setpoint / ticks2RPm);
 
-    SmartDashboard.putNumber("SetPoint (RPM)", reference_setpoint);  // was m_setpoint
+    SmartDashboard.putNumber("SetPoint (RPM)", reference_setpoint); // was m_setpoint
     SmartDashboard.putNumber("Velocity (RPM)", rpm);
     SmartDashboard.putNumber("Total Current (Amp)", m_pdp.getTotalCurrent());
     SmartDashboard.putNumber("Total Power (W)", m_pdp.getTotalPower());
